@@ -127,7 +127,8 @@ python -m pip install -r requirements.txt
 ```
 
 This installs FastAPI, Uvicorn, Pydantic, configuration helpers, pytest, and
-HTTPX. It intentionally does **not** install PyTorch, Transformers, Accelerate,
+httpx2 (the HTTP client used by FastAPI's `TestClient`). It intentionally does
+**not** install PyTorch, Transformers, Accelerate,
 or CUDA. Those are Colab inference dependencies and will be handled in Phase 2.
 
 ### 5. Create local configuration
