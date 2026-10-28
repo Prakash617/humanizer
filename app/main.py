@@ -1,8 +1,8 @@
 """FastAPI application and HTTP routes.
 
-The API is deliberately thin: it validates requests, calls the model service, and
-translates domain errors into HTTP responses. Model loading and inference stay in
-``app.humanizer``.
+The API is deliberately thin: it validates requests, calls the configured model
+service, and translates domain errors into HTTP responses. Local inference lives in
+``app.humanizer`` and remote inference lives in ``app.remote``.
 """
 
 from __future__ import annotations
@@ -29,6 +29,14 @@ from app.humanizer import (
     ModelNotLoadedError,
     get_humanizer,
 )
+from app.remote import (
+    RemoteAuthError,
+    RemoteConnectionError,
+    RemoteHumanizer,
+    RemoteRateLimitError,
+    RemoteResponseError,
+    RemoteTimeoutError,
+)
 from app.schemas import (
     HealthResponse,
     HumanizeRequest,
@@ -41,23 +49,31 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def _build_service() -> HumanizerProtocol:
+    """Choose the configured inference backend."""
+
+    if settings.inference_backend == "remote":
+        return RemoteHumanizer()
+    return get_humanizer()
+
+
 def create_app(humanizer: HumanizerProtocol | None = None) -> FastAPI:
     """Build the API.
 
     ``humanizer`` can be injected in tests or in a Colab notebook that has already
-    loaded the model. The default is the process-wide model service.
+    loaded the model. The default is the configured local or remote backend.
     """
 
-    service = humanizer if humanizer is not None else get_humanizer()
+    service = humanizer if humanizer is not None else _build_service()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.startup_error = None
         try:
-            # Model loading is blocking, so keep it off the event loop.
+            # Local model loading can block, so keep it off the event loop.
             await run_in_threadpool(service.load)
         except Exception:
-            logger.exception("Model failed to load during application startup")
+            logger.exception("Backend failed to load during application startup")
             app.state.startup_error = "Model failed to load. Check the server logs."
         yield
 
@@ -66,7 +82,8 @@ def create_app(humanizer: HumanizerProtocol | None = None) -> FastAPI:
         version=settings.app_version,
         description=(
             "Rewrite English text for clarity, fluency, and readability while "
-            "preserving meaning. The model runs in the same process as this API."
+            "preserving meaning. The configured local or remote model handles "
+            "the rewrite."
         ),
         lifespan=lifespan,
     )
@@ -169,8 +186,11 @@ def create_app(humanizer: HumanizerProtocol | None = None) -> FastAPI:
             401: {"description": "Invalid or missing API key"},
             413: {"description": "Input too long"},
             422: {"description": "Validation error"},
+            429: {"description": "Remote provider rate limit reached"},
             500: {"description": "Model inference failed"},
+            502: {"description": "Remote provider rejected the request"},
             503: {"description": "Model is not loaded"},
+            504: {"description": "Remote provider timed out"},
         },
     )
     def humanize(payload: HumanizeRequest) -> HumanizeResponse:
@@ -205,6 +225,36 @@ def create_app(humanizer: HumanizerProtocol | None = None) -> FastAPI:
         except ModelNotLoadedError as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=str(exc),
+            ) from exc
+        except RemoteAuthError as exc:
+            logger.warning("Remote provider rejected the configured credentials")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=str(exc),
+            ) from exc
+        except RemoteRateLimitError as exc:
+            logger.warning("Remote provider rate limit reached")
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=str(exc),
+            ) from exc
+        except RemoteTimeoutError as exc:
+            logger.warning("Remote provider timed out")
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail=str(exc),
+            ) from exc
+        except RemoteResponseError as exc:
+            logger.warning("Remote provider returned an unusable response")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=str(exc),
+            ) from exc
+        except RemoteConnectionError as exc:
+            logger.warning("Could not reach the remote provider")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=str(exc),
             ) from exc
         except InferenceError as exc:

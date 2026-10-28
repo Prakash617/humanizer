@@ -3,13 +3,16 @@
 A beginner-friendly prototype that rewrites English text for better naturalness,
 clarity, fluency, and readability while preserving meaning.
 
-The project is developed on an Ubuntu laptop with VS Code. The laptop runs the
-FastAPI layer, validation, and mocked tests. The Hugging Face model runs in Google
-Colab, where a GPU is available. The laptop does **not** run model inference.
+The project is developed on an Ubuntu laptop with VS Code. Inference can run in
+three places:
+
+- locally on the GTX 1060 with Qwen2.5-1.5B-Instruct
+- in Google Colab on a GPU
+- remotely through an OpenAI-compatible provider such as NVIDIA NIM
 
 > **Status: complete prototype.**
-> The production inference module, Pydantic schemas, FastAPI endpoints, mocked test
-> suite, gated real-model integration test, and two Colab notebooks are included.
+> The local model, remote backend, Pydantic schemas, FastAPI endpoints, mocked test
+> suite, gated integration tests, browser UI, and two Colab notebooks are included.
 > The full API is demonstrated in `notebooks/colab_api_demo.ipynb`.
 
 > **What this project is not.** It improves writing quality. It does not guarantee
@@ -29,6 +32,7 @@ Colab, where a GPU is available. The laptop does **not** run model inference.
 - [Browser UI](#browser-ui)
 - [Run the API locally](#run-the-api-locally)
 - [Local GPU mode (GTX 1060 6 GB)](#local-gpu-mode-gtx-1060-6-gb)
+- [Remote backend (NVIDIA NIM)](#remote-backend-nvidia-nim)
 - [Colab notebook 1: model experiments](#colab-notebook-1-model-experiments)
 - [Colab notebook 2: full API demo](#colab-notebook-2-full-api-demo)
 - [Security and Colab lifetime](#security-and-colab-lifetime)
@@ -42,17 +46,13 @@ Colab, where a GPU is available. The laptop does **not** run model inference.
 ```text
 Ubuntu laptop (VS Code)
         |
-        |  edit, run mocked tests, git commit/push
+        |  FastAPI routes + /ui
         v
-   Git repository
+  app/main.py
         |
-        |  git clone / git pull inside Colab
-        v
-Google Colab runtime (temporary)
+        +-- local:   app/humanizer.py -> Qwen on GTX 1060 or Colab GPU
         |
-        |  FastAPI routes  --->  app/humanizer.py  --->  Qwen on GPU
-        v
-  HTTP API (localhost or temporary authenticated tunnel)
+        +-- remote:  app/remote.py    -> NVIDIA NIM / OpenAI-compatible API
 ```
 
 Responsibilities are deliberately separated:
@@ -60,9 +60,10 @@ Responsibilities are deliberately separated:
 | File | Responsibility |
 |---|---|
 | `app/config.py` | Settings from environment variables and `.env` |
-| `app/humanizer.py` | Model loading, prompt, chunking, generation, fallback |
+| `app/humanizer.py` | Local model loading, prompt, chunking, generation, fallback |
+| `app/remote.py` | Optional OpenAI-compatible remote inference |
 | `app/schemas.py` | Pydantic request/response models and style enum |
-| `app/main.py` | FastAPI app, lifespan, routes, API-key check, error mapping |
+| `app/main.py` | FastAPI app, lifespan, backend selection, routes, error mapping |
 
 The API never imports a frontend. A future web or desktop frontend should call the
 HTTP endpoints instead of importing Python model objects.
@@ -88,6 +89,22 @@ Model card: <https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct>
 
 Fallback: <https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct>
 
+### Optional remote model
+
+| Item | Finding |
+|---|---|
+| Provider | NVIDIA NIM |
+| Model | `nvidia/nemotron-3-super-120b-a12b` |
+| Size | 120B total, 12B active (MoE) |
+| Context | Up to 1M tokens |
+| Strength | Strong instruction following and long-context editing |
+| Caveat | Hosted inference sends text to the provider and may cost money |
+
+Other NIM text models such as `meta/llama-3.3-70b-instruct`,
+`nemotron-3.5-lightning-30b-a3b`, or `openai/gpt-oss-20b` can be selected with
+`REMOTE_MODEL`. The remote backend is optional; local inference remains the
+default.
+
 ## Project structure
 
 ```text
@@ -95,20 +112,24 @@ humanizer/
 ├── app/
 │   ├── __init__.py                    # Package version
 │   ├── config.py                      # Environment/.env settings
-│   ├── humanizer.py                   # Model loading and rewriting
-│   ├── main.py                        # FastAPI app and routes
+│   ├── humanizer.py                   # Local model loading and rewriting
+│   ├── remote.py                      # OpenAI-compatible remote inference
+│   ├── main.py                        # FastAPI app, routes, backend selection
 │   ├── schemas.py                     # Pydantic request/response models
 │   └── ui.py                          # Built-in browser UI
 ├── tests/
 │   ├── __init__.py
-│   ├── test_api.py                    # 14 mocked API tests
-│   └── test_integration_real_model.py # Real-model test, opt-in only
+│   ├── test_api.py                    # Mocked API tests
+│   ├── test_remote.py                 # Offline remote-backend tests
+│   ├── test_integration_real_model.py # Real local model, opt-in only
+│   └── test_integration_remote.py     # Real remote provider, opt-in only
 ├── notebooks/
 │   ├── humanizer_experiments.ipynb    # Model and prompt experiments
 │   └── colab_api_demo.ipynb           # Full API demo in Colab
 ├── scripts/
 │   ├── setup_local_gpu.sh             # Python 3.12 + CUDA environment
-│   └── run_local.sh                   # Start the local GPU API and UI
+│   ├── run_local.sh                   # Start the local GPU API and UI
+│   └── run_remote.sh                  # Start the remote-backend API and UI
 ├── requirements.txt                   # Lightweight local/API dependencies
 ├── requirements-colab.txt             # Colab inference dependencies
 ├── pytest.ini                         # Test paths and markers
@@ -125,8 +146,10 @@ humanizer/
 - Visual Studio Code
 - Internet access for package installation
 
-No NVIDIA/CUDA setup is needed on the laptop. The local virtual environment stays
-lightweight because PyTorch and Transformers are installed only in Colab.
+The lightweight `.venv` is enough for the remote backend and mocked tests. Local
+GPU inference needs an NVIDIA driver and the separate `.venv-gpu` environment.
+Colab remains an option when no local GPU is available. The remote backend uses
+only the Python standard library for HTTP, so it adds no packages.
 
 ## Local setup
 
@@ -167,7 +190,7 @@ python -m pip install -r requirements.txt
 
 This installs FastAPI, Uvicorn, Pydantic, configuration helpers, pytest, and
 httpx2. It intentionally does **not** install PyTorch, Transformers, Accelerate, or
-CUDA. Those are Colab inference dependencies.
+CUDA. Those are installed in `.venv-gpu` for local inference or in Colab.
 
 ### 4. Create local configuration
 
@@ -189,11 +212,11 @@ python -m pytest -q
 Expected:
 
 ```text
-14 passed, 1 skipped
+34 passed, 2 skipped
 ```
 
-The 14 tests use a fake model. They never download weights, import PyTorch, or need
-a GPU. They check:
+The default tests use a fake model and a fake HTTP response. They never download
+weights, import PyTorch, contact a provider, or need a GPU. They check:
 
 - `GET /` metadata
 - `GET /ui` serves the browser UI
@@ -205,17 +228,17 @@ a GPU. They check:
 - inference failure (`500`)
 - model-not-loaded behavior (`503`)
 - optional `X-API-Key` protection (`401` then `200`)
+- remote request construction, authentication, rate limits, timeouts, and malformed responses (`429`, `502`, `504`)
 
-The skipped test is the real-model integration test. Run it only in an environment
-with PyTorch, Transformers, and enough memory:
+Two integration tests are skipped by default. The local real-model test needs
+PyTorch, Transformers, and enough memory:
 
 ```bash
 RUN_REAL_MODEL_TESTS=1 python -m pytest tests/test_integration_real_model.py -q -s
 ```
 
-That test downloads the real model and performs one request through `TestClient`.
-Do not run it on the laptop unless you installed the inference stack and have enough
-RAM.
+It downloads the real model and performs one request through `TestClient`. The
+remote provider test is described in the NIM section above.
 
 ## Configuration
 
@@ -238,7 +261,15 @@ Settings are read from environment variables first, then `.env`.
 | `TOP_K` | `20` | Top-k sampling |
 | `REPETITION_PENALTY` | `1.1` | Repetition control |
 | `API_KEY` | empty | When set, `POST /humanize` needs `X-API-Key` |
+| `INFERENCE_BACKEND` | `local` | `local` or `remote` |
+| `REMOTE_BASE_URL` | `https://integrate.api.nvidia.com/v1` | OpenAI-compatible base URL |
+| `REMOTE_MODEL` | `nvidia/nemotron-3-super-120b-a12b` | Hosted model ID |
+| `REMOTE_API_KEY` | empty | Provider key; required when the backend is remote |
+| `REMOTE_TIMEOUT_SECONDS` | `120` | Per-request timeout |
+| `REMOTE_MAX_TOKENS` | `1024` | Remote generation budget |
+| `REMOTE_EXTRA_BODY` | thinking disabled | Provider-specific JSON fields |
 
+`TEMPERATURE`, `TOP_P`, and `MAX_INPUT_CHARACTERS` also apply to remote requests.
 `GET /` and `GET /health` are always public. They expose no text and no secrets.
 
 ## API reference
@@ -309,8 +340,11 @@ Request body validation behavior:
 | `401` | Missing or wrong `X-API-Key` (only when `API_KEY` is set) |
 | `413` | Input exceeds the character or token limit |
 | `422` | Schema or style validation error |
-| `500` | Model inference failed |
+| `429` | Remote provider rate limit reached |
+| `500` | Local model inference failed |
+| `502` | Remote provider rejected the request or returned an unusable response |
 | `503` | Model is not loaded or could not load |
+| `504` | Remote provider timed out |
 
 Response:
 
@@ -345,8 +379,9 @@ These are instructions, not hard guarantees. Review important output manually.
 The service splits text at paragraph boundaries, then sentence boundaries, into
 chunks of at most `MAX_CHUNK_TOKENS`. Oversized sentences are split on token
 boundaries as a last resort. Inputs above `MAX_INPUT_TOKENS` are rejected with a
-clear error instead of being silently truncated. Chunks are rewritten separately
-and joined with blank lines.
+clear error instead of being silently truncated. Local chunks are rewritten
+separately and joined with blank lines. The remote backend sends the whole input
+in one request because hosted models have much larger context windows.
 
 ## Browser UI
 
@@ -389,8 +424,8 @@ The UI still requires the same API key for `POST /humanize`.
 http://127.0.0.1:8000/ui
 ```
 
-Locally, without PyTorch and the model, the UI opens but requests return `503`.
-That is expected.
+Locally, without PyTorch and a local model, the UI opens but requests return `503`
+unless `INFERENCE_BACKEND=remote` is configured.
 
 ## Run the API locally
 
@@ -406,7 +441,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 - `/humanize` returns `503` because no model is loaded
 
 That behavior is useful for developing routes and validation. For real inference,
-use the local GPU mode below or the Colab API notebook.
+use the local GPU mode, the remote NIM backend, or the Colab API notebook.
 
 To run the real API on a machine that already has the inference stack:
 
@@ -503,6 +538,129 @@ MODEL_ID=Qwen/Qwen2.5-0.5B-Instruct
 The GTX 1060 is a Pascal card. It works, but generation is slower than a modern
 Colab GPU. Short paragraphs are fine; long documents take longer.
 
+## Remote backend (NVIDIA NIM)
+
+Remote mode is optional. It sends each request to an OpenAI-compatible endpoint and
+does not load a local model. This is useful on a machine without a GPU, or when a
+larger model produces better prose.
+
+A larger model improves writing quality, but it still does **not** guarantee a
+particular AI-detector result. The project remains a writing tool, not a
+detector-bypass service.
+
+### 1. Add a fresh key to `.env`
+
+If a key was ever pasted into a chat, issue tracker, or commit, revoke it in the
+NVIDIA console and create a new one. Do not reuse an exposed key.
+
+```dotenv
+INFERENCE_BACKEND=remote
+REMOTE_BASE_URL=https://integrate.api.nvidia.com/v1
+REMOTE_MODEL=nvidia/nemotron-3-super-120b-a12b
+REMOTE_API_KEY=your-fresh-key
+
+REMOTE_TIMEOUT_SECONDS=120
+REMOTE_MAX_TOKENS=1024
+
+# Nemotron reasons by default. Disable thinking for faster rewriting.
+REMOTE_EXTRA_BODY={"chat_template_kwargs":{"enable_thinking":false}}
+```
+
+Confirm the secret file is ignored:
+
+```bash
+git check-ignore .env
+git status --short
+```
+
+`.env` must never appear in `git status`. Do not put the key in `.env.example`,
+source files, shell history, screenshots, or chat.
+
+### 2. Start the remote API and UI
+
+```bash
+./scripts/run_remote.sh
+```
+
+Open:
+
+```text
+http://127.0.0.1:8000/ui
+```
+
+Startup is fast because no weights are downloaded. The script checks that
+`REMOTE_API_KEY` is present without printing it.
+
+### 3. Verify
+
+```bash
+curl http://127.0.0.1:8000/health
+
+curl -X POST http://127.0.0.1:8000/humanize \
+  -H "Content-Type: application/json" \
+  -d '{"text":"In 2024, Dr. Chen wrote 3 reports.","style":"professional"}'
+```
+
+`/health` should report the remote model ID. A bad key returns `502`; a provider
+timeout returns `504`; a rate limit returns `429`.
+
+### 4. Model choices
+
+The default is a strong general-purpose choice:
+
+| Model ID | Notes |
+|---|---|
+| `nvidia/nemotron-3-super-120b-a12b` | 120B total / 12B active, long context, thinking disabled for editing |
+| `meta/llama-3.3-70b-instruct` | Strong classic instruct model, no reasoning overhead |
+| `nemotron-3.5-lightning-30b-a3b` | Faster and cheaper for short edits |
+| `openai/gpt-oss-20b` | Smaller open model, lower cost |
+
+Availability depends on your NVIDIA account and region. To list the exact IDs your
+key can access without printing the key:
+
+```bash
+.venv/bin/python - <<'PY'
+import json
+import urllib.request
+
+from app.config import get_settings
+
+settings = get_settings()
+request = urllib.request.Request(
+    f"{settings.remote_base_url}/models",
+    headers={"Authorization": f"Bearer {settings.remote_api_key}"},
+)
+with urllib.request.urlopen(request, timeout=30) as response:
+    payload = json.load(response)
+
+for model in payload.get("data", []):
+    print(model.get("id"))
+PY
+```
+
+If a model ID returns `404`, choose one from that list.
+
+### 5. Test the remote backend
+
+Offline tests use a fake HTTP response and never contact the provider:
+
+```bash
+python -m pytest tests/test_remote.py -q
+```
+
+The real-provider test is opt-in and may incur charges:
+
+```bash
+RUN_REMOTE_TESTS=1 python -m pytest tests/test_integration_remote.py -q -s
+```
+
+### Privacy and cost
+
+- Your text leaves the laptop and goes to the provider.
+- The provider's retention and training policies apply.
+- Hosted inference may cost money; check the provider's current pricing.
+- Do not send confidential material unless the provider's terms allow it.
+
 ## Colab notebook 1: model experiments
 
 `notebooks/humanizer_experiments.ipynb` explores the model and prompt before the
@@ -558,7 +716,7 @@ starts Uvicorn, and optionally exposes a temporary authenticated tunnel.
 | Environment | Hugging Face cache outside the repository |
 | Clone | The laptop code runs from Git in Colab |
 | Install | Colab-specific inference dependencies |
-| Unit tests | 14 mocked tests pass in the Colab runtime |
+| Unit tests | 34 offline tests pass in the Colab runtime |
 | Load model | Qwen loads once; the API key is created or read |
 | TestClient | `/`, `/health`, `401` without key, `200` with key |
 | Uvicorn | The same app serves real local HTTP on port 8000 |
@@ -570,7 +728,7 @@ starts Uvicorn, and optionally exposes a temporary authenticated tunnel.
 
 ### Expected result
 
-- The mocked suite reports `14 passed, 1 skipped`.
+- The offline suite reports `34 passed, 2 skipped`.
 - The model loads once. The notebook prints the model ID, device, and dtype.
 - `GET /` returns API metadata with `model_loaded: true` and `ui_url: /ui`.
 - `GET /health` returns `200` and the loaded model ID.
@@ -633,7 +791,10 @@ importing the app, so `POST /humanize` requires the header by default.
 
 - Bind Uvicorn to `127.0.0.1` unless you intentionally create a tunnel.
 - Keep `API_KEY` set whenever a tunnel exists.
-- Never commit `.env`, API keys, ngrok tokens, or Hugging Face tokens.
+- Never commit `.env`, provider keys, API keys, ngrok tokens, or Hugging Face tokens.
+- Treat any key pasted into chat, a log, or a screenshot as exposed and rotate it.
+- Remote mode sends text to a third party. Review that provider's data policy before
+  submitting private or confidential material.
 - Colab deletes packages, model weights, the Git clone, the server, the tunnel, and
   the generated API key when the runtime stops.
 - A Colab URL is not a production service. It has no SLA, rate limiting, billing
@@ -689,9 +850,25 @@ In Colab, run the stop cell and restart the runtime.
 
 ### Local `/health` returns `503`
 
-Expected on the laptop: PyTorch and Transformers are not installed. Use the real
-model in Colab, or install `requirements-colab.txt` on a machine with enough
-memory.
+The local model is not loaded. Check the server log for a download, memory, or
+driver error. Either install the local inference stack (`./scripts/setup_local_gpu.sh`),
+use Colab, or switch to `INFERENCE_BACKEND=remote` with a valid
+`REMOTE_API_KEY`.
+
+### Remote `/humanize` returns `502`
+
+- `The remote provider rejected the API key`: replace `REMOTE_API_KEY` with a fresh,
+  valid key and restart the server.
+- `HTTP 404`: the model ID is not available to your account. List the models your
+  key can access, as shown in the NIM section.
+- `HTTP 429`: the provider rate limit was reached. Wait and retry.
+- `invalid JSON` or `did not contain choices`: the provider returned an unexpected
+  response. Check the base URL and model ID.
+
+### Remote `/humanize` returns `504`
+
+The provider did not respond before `REMOTE_TIMEOUT_SECONDS`. Increase the timeout
+for long inputs, or retry when the provider is less busy.
 
 ### `401 Invalid or missing API key`
 
@@ -835,13 +1012,13 @@ Do not deploy this prototype as an open, unauthenticated endpoint.
 - [x] `GET /`, `GET /health`, `POST /humanize`
 - [x] Pydantic schemas and style enum
 - [x] Lifespan model loading with injected service support
-- [x] Error mapping (`400`, `401`, `413`, `422`, `500`, `503`)
+- [x] Error mapping (`400`, `401`, `413`, `422`, `429`, `500`, `502`, `503`, `504`)
 - [x] Optional `X-API-Key` protection
 - [x] Built-in browser UI at `/ui`
 
 ### Phase 5 — tests and Colab demonstration
 
-- [x] 14 mocked tests pass locally: `14 passed, 1 skipped`
+- [x] 34 offline tests pass locally: `34 passed, 2 skipped`
 - [x] Real-model integration test gated by `RUN_REAL_MODEL_TESTS=1`
 - [x] Colab API notebook created and syntax-validated
 - [x] Notebook loads one model, uses `TestClient`, starts Uvicorn, optional tunnel
@@ -862,6 +1039,21 @@ Do not deploy this prototype as an open, unauthenticated endpoint.
 The Colab path remains available for machines without a local GPU. Local inference
 was validated on this laptop with short paragraphs; long documents are slower.
 
+### Phase 7 — remote backend
+
+- [x] OpenAI-compatible `RemoteHumanizer` using only the standard library
+- [x] `INFERENCE_BACKEND=local|remote` selection
+- [x] NVIDIA NIM defaults and configurable model, timeout, and extra body
+- [x] Nemotron thinking disabled by default for faster edits
+- [x] Offline request, auth, rate-limit, timeout, and malformed-response tests
+- [x] Opt-in real-provider integration test
+- [x] `scripts/run_remote.sh` launch helper
+- [ ] Optional: rotate a fresh NIM key into `.env` and run the real remote test
+
+The remote request path was validated end-to-end against a local
+OpenAI-compatible test server. Live-provider validation requires your own key;
+add it to `.env` before running `RUN_REMOTE_TESTS=1`.
+
 ## Limitations
 
 - Instruction-following is probabilistic. Meaning, names, dates, and numbers can
@@ -870,6 +1062,10 @@ was validated on this laptop with short paragraphs; long documents are slower.
   against prompt injection.
 - The model can produce awkward or repetitive text, especially on CPU fallback.
 - The prototype has no persistent storage, user accounts, billing, or rate limits.
-- Long documents are chunked. Cross-paragraph coherence can suffer.
+- Long documents are chunked in local mode. Cross-paragraph coherence can suffer.
+- Remote mode requires internet access, a provider account, and may cost money.
+  Submitted text leaves the machine and is subject to the provider's data policy.
+- A larger remote model can improve prose, but it does not guarantee a particular
+  AI-detector score.
 - This is not a plagiarism checker, fact-checker, translator, or AI-detector
   bypass tool.
