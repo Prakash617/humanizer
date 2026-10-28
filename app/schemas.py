@@ -73,6 +73,7 @@ class RootResponse(BaseModel):
     status: str
     model_loaded: bool
     docs_url: str
+    ui_url: str
 
 
 class HealthResponse(BaseModel):

@@ -26,6 +26,7 @@ Colab, where a GPU is available. The laptop does **not** run model inference.
 - [Run the tests](#run-the-tests)
 - [Configuration](#configuration)
 - [API reference](#api-reference)
+- [Browser UI](#browser-ui)
 - [Run the API locally](#run-the-api-locally)
 - [Colab notebook 1: model experiments](#colab-notebook-1-model-experiments)
 - [Colab notebook 2: full API demo](#colab-notebook-2-full-api-demo)
@@ -95,10 +96,11 @@ humanizer/
 │   ├── config.py                      # Environment/.env settings
 │   ├── humanizer.py                   # Model loading and rewriting
 │   ├── main.py                        # FastAPI app and routes
-│   └── schemas.py                     # Pydantic request/response models
+│   ├── schemas.py                     # Pydantic request/response models
+│   └── ui.py                          # Built-in browser UI
 ├── tests/
 │   ├── __init__.py
-│   ├── test_api.py                    # 13 mocked API tests
+│   ├── test_api.py                    # 14 mocked API tests
 │   └── test_integration_real_model.py # Real-model test, opt-in only
 ├── notebooks/
 │   ├── humanizer_experiments.ipynb    # Model and prompt experiments
@@ -183,13 +185,14 @@ python -m pytest -q
 Expected:
 
 ```text
-13 passed, 1 skipped
+14 passed, 1 skipped
 ```
 
-The 13 tests use a fake model. They never download weights, import PyTorch, or need
+The 14 tests use a fake model. They never download weights, import PyTorch, or need
 a GPU. They check:
 
 - `GET /` metadata
+- `GET /ui` serves the browser UI
 - `GET /health` when the model is loaded or failed
 - successful humanization and response schema
 - empty, whitespace-only, and missing text rejection
@@ -250,7 +253,8 @@ curl http://127.0.0.1:8000/
   "version": "0.2.0",
   "status": "running",
   "model_loaded": true,
-  "docs_url": "/docs"
+  "docs_url": "/docs",
+  "ui_url": "/ui"
 }
 ```
 
@@ -340,6 +344,50 @@ boundaries as a last resort. Inputs above `MAX_INPUT_TOKENS` are rejected with a
 clear error instead of being silently truncated. Chunks are rewritten separately
 and joined with blank lines.
 
+## Browser UI
+
+The API includes a dependency-free UI at `/ui`. It lets you:
+
+- paste the API key
+- paste or type text
+- choose one of the five styles
+- click **Humanize**
+- copy the rewritten result
+- see clear validation and HTTP errors
+
+No extra packages, build step, or CDN is required. The page calls `/humanize` on
+the same origin, so the API key is never embedded in the HTML.
+
+### In Colab
+
+After the Uvicorn cell, run the **Open the browser UI** cell. It embeds the UI
+inside the notebook output using `serve_kernel_port_as_iframe`. Paste the API key
+printed by that cell; keep it private.
+
+If the iframe does not render, use a separate window:
+
+```python
+from google.colab.output import serve_kernel_port_as_window
+serve_kernel_port_as_window(8000, path="/ui")
+```
+
+Or use the optional tunnel and open:
+
+```text
+https://YOUR_TUNNEL_URL/ui
+```
+
+The UI still requires the same API key for `POST /humanize`.
+
+### On a machine with a real model
+
+```text
+http://127.0.0.1:8000/ui
+```
+
+Locally, without PyTorch and the model, the UI opens but requests return `503`.
+That is expected.
+
 ## Run the API locally
 
 The local API will start, but the model cannot load without PyTorch and
@@ -421,10 +469,11 @@ starts Uvicorn, and optionally exposes a temporary authenticated tunnel.
 | Environment | Hugging Face cache outside the repository |
 | Clone | The laptop code runs from Git in Colab |
 | Install | Colab-specific inference dependencies |
-| Unit tests | 13 mocked tests pass in the Colab runtime |
+| Unit tests | 14 mocked tests pass in the Colab runtime |
 | Load model | Qwen loads once; the API key is created or read |
 | TestClient | `/`, `/health`, `401` without key, `200` with key |
 | Uvicorn | The same app serves real local HTTP on port 8000 |
+| UI | Embeds `/ui` in the notebook for point-and-click use |
 | Tunnel | Optional temporary public URL, still key-protected |
 | Stop | Stops Uvicorn and the tunnel cleanly |
 | Troubleshooting | Common Colab failures and fixes |
@@ -432,13 +481,14 @@ starts Uvicorn, and optionally exposes a temporary authenticated tunnel.
 
 ### Expected result
 
-- The mocked suite reports `13 passed, 1 skipped`.
+- The mocked suite reports `14 passed, 1 skipped`.
 - The model loads once. The notebook prints the model ID, device, and dtype.
-- `GET /` returns API metadata with `model_loaded: true`.
+- `GET /` returns API metadata with `model_loaded: true` and `ui_url: /ui`.
 - `GET /health` returns `200` and the loaded model ID.
 - `POST /humanize` without `X-API-Key` returns `401`.
 - `POST /humanize` with `X-API-Key` returns a rewritten paragraph.
 - Uvicorn serves the same app at `http://127.0.0.1:8000` inside Colab.
+- The UI cell embeds `/ui`; pasting the API key enables point-and-click rewriting.
 - The optional ngrok cell prints a temporary HTTPS URL. The API key is still
   required.
 
@@ -607,6 +657,17 @@ fallback only when PyTorch is missing.
 - Check that port 8000 is free in the runtime.
 - Run the stop cell, restart the runtime, and rerun from the top.
 
+### The UI does not appear in Colab
+
+- Run the Uvicorn cell first and wait for `Uvicorn started`.
+- Rerun the UI cell after the server is ready.
+- If the iframe is blocked, open a separate window:
+  ```python
+  from google.colab.output import serve_kernel_port_as_window
+  serve_kernel_port_as_window(8000, path="/ui")
+  ```
+- Through a tunnel, open `TUNNEL_URL/ui` and paste the API key.
+
 ### ngrok shows an HTML warning page
 
 For API requests add:
@@ -687,10 +748,11 @@ Do not deploy this prototype as an open, unauthenticated endpoint.
 - [x] Lifespan model loading with injected service support
 - [x] Error mapping (`400`, `401`, `413`, `422`, `500`, `503`)
 - [x] Optional `X-API-Key` protection
+- [x] Built-in browser UI at `/ui`
 
 ### Phase 5 — tests and Colab demonstration
 
-- [x] 13 mocked tests pass locally: `13 passed, 1 skipped`
+- [x] 14 mocked tests pass locally: `14 passed, 1 skipped`
 - [x] Real-model integration test gated by `RUN_REAL_MODEL_TESTS=1`
 - [x] Colab API notebook created and syntax-validated
 - [x] Notebook loads one model, uses `TestClient`, starts Uvicorn, optional tunnel

@@ -82,6 +82,17 @@ def test_home_endpoint(client: TestClient) -> None:
     assert body["status"] == "running"
     assert body["model_loaded"] is True
     assert body["docs_url"] == "/docs"
+    assert body["ui_url"] == "/ui"
+
+
+def test_ui_is_served(client: TestClient) -> None:
+    response = client.get("/ui")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "AI Humanizer" in response.text
+    assert 'id="humanize-form"' in response.text
+    assert "/humanize" in response.text
 
 
 def test_health_endpoint_when_model_loaded(client: TestClient) -> None:

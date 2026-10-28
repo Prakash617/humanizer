@@ -15,7 +15,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from app.config import get_settings
@@ -35,6 +35,7 @@ from app.schemas import (
     HumanizeResponse,
     RootResponse,
 )
+from app.ui import UI_HTML
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -121,7 +122,14 @@ def create_app(humanizer: HumanizerProtocol | None = None) -> FastAPI:
             status="running",
             model_loaded=service.is_loaded,
             docs_url="/docs",
+            ui_url="/ui",
         )
+
+    @app.get("/ui", response_class=HTMLResponse, include_in_schema=False)
+    def humanizer_ui() -> HTMLResponse:
+        """Serve the dependency-free browser UI."""
+
+        return HTMLResponse(UI_HTML)
 
     @app.get(
         "/health",
