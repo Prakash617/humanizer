@@ -395,22 +395,23 @@ starts Uvicorn, and optionally exposes a temporary authenticated tunnel.
 
 ### Exact steps
 
-1. Push this repository to GitHub (public HTTPS is simplest).
-2. Open <https://colab.research.google.com>.
-3. Choose **File > Open notebook > GitHub**, enter your repository, and select
-   `notebooks/colab_api_demo.ipynb`.
-   Uploading the `.ipynb` file manually also works.
-4. In Colab, choose **Runtime > Change runtime type > T4 GPU**.
-5. Optional: add Colab Secrets (key icon in the left sidebar):
+1. Open the notebook directly in Colab:
+
+   <https://colab.research.google.com/github/Prakash617/humanizer/blob/main/notebooks/colab_api_demo.ipynb>
+
+   Or use **File > Open notebook > GitHub** and select
+   `Prakash617/humanizer`, then `notebooks/colab_api_demo.ipynb`.
+2. In Colab, choose **Runtime > Change runtime type > T4 GPU**.
+3. Optional: add Colab Secrets (key icon in the left sidebar):
    - `HUMANIZER_API_KEY` — your API key. If absent, a random key is generated.
    - `HF_TOKEN` — only for private/gated models. Not needed for Qwen.
    - `NGROK_AUTHTOKEN` — only for the optional public tunnel.
-6. Edit the clone cell:
+4. Choose **Runtime > Run all**, or run the cells top to bottom. The clone cell is
+   already set to:
    ```python
-   REPO_URL = "https://github.com/YOUR_USERNAME/humanizer.git"
+   REPO_URL = "https://github.com/Prakash617/humanizer.git"
    ```
-7. Choose **Runtime > Run all**, or run the cells top to bottom.
-8. Read the output of each cell. Do not skip the mocked test cell.
+5. Read the output of each cell. Do not skip the mocked test cell.
 
 ### What the notebook proves
 
