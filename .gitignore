@@ -37,9 +37,10 @@ model_weights/
 .cache/huggingface/
 huggingface/
 
-# Experiment artifacts
+# Experiment and release artifacts
 outputs/
 results/
+dist/
 notebooks/outputs/
 *.log
 
