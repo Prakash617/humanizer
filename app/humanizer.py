@@ -256,7 +256,14 @@ class ModelHumanizer:
         }
 
         if torch.cuda.is_available():
-            dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+            # Pascal (GTX 10-series) reports BF16 support through CUDA but has no
+            # native BF16 hardware. Use FP16 there; BF16 needs Ampere or newer.
+            major, _ = torch.cuda.get_device_capability(0)
+            dtype = (
+                torch.bfloat16
+                if major >= 8 and torch.cuda.is_bf16_supported()
+                else torch.float16
+            )
             load_kwargs["device_map"] = "auto"
         else:
             dtype = torch.float32

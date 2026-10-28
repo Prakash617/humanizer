@@ -28,6 +28,7 @@ Colab, where a GPU is available. The laptop does **not** run model inference.
 - [API reference](#api-reference)
 - [Browser UI](#browser-ui)
 - [Run the API locally](#run-the-api-locally)
+- [Local GPU mode (GTX 1060 6 GB)](#local-gpu-mode-gtx-1060-6-gb)
 - [Colab notebook 1: model experiments](#colab-notebook-1-model-experiments)
 - [Colab notebook 2: full API demo](#colab-notebook-2-full-api-demo)
 - [Security and Colab lifetime](#security-and-colab-lifetime)
@@ -105,6 +106,9 @@ humanizer/
 ├── notebooks/
 │   ├── humanizer_experiments.ipynb    # Model and prompt experiments
 │   └── colab_api_demo.ipynb           # Full API demo in Colab
+├── scripts/
+│   ├── setup_local_gpu.sh             # Python 3.12 + CUDA environment
+│   └── run_local.sh                   # Start the local GPU API and UI
 ├── requirements.txt                   # Lightweight local/API dependencies
 ├── requirements-colab.txt             # Colab inference dependencies
 ├── pytest.ini                         # Test paths and markers
@@ -402,9 +406,9 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 - `/humanize` returns `503` because no model is loaded
 
 That behavior is useful for developing routes and validation. For real inference,
-use the Colab API notebook.
+use the local GPU mode below or the Colab API notebook.
 
-To run the real API on a machine that has the inference stack:
+To run the real API on a machine that already has the inference stack:
 
 ```bash
 python -m pip install -r requirements.txt -r requirements-colab.txt
@@ -413,6 +417,91 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 Loading the 1.5B model takes time and memory. Watch the server log; `/health`
 becomes `200` only after loading succeeds.
+
+## Local GPU mode (GTX 1060 6 GB)
+
+This project was tested locally on a Dell G7 7588 with:
+
+```text
+GPU:        NVIDIA GeForce GTX 1060 Mobile (Max-Q), 6144 MiB
+Driver:     580.178.04
+PyTorch:    2.7.1+cu126
+Precision:  FP16
+VRAM:       about 2.9 GiB loaded
+Sample:     about 2.4 seconds for a short paragraph
+```
+
+Pascal GPUs do not have native BF16, so `app/humanizer.py` selects FP16 on
+compute capability 6.x. Newer Ampere and later cards use BF16.
+
+### 1. Install the NVIDIA driver once
+
+```bash
+sudo apt update
+sudo ubuntu-drivers install nvidia-driver-580
+sudo reboot
+```
+
+After reboot, confirm the GPU is visible:
+
+```bash
+nvidia-smi
+```
+
+### 2. Create the GPU environment
+
+```bash
+cd ~/Desktop/program/ai/humanizer
+./scripts/setup_local_gpu.sh
+```
+
+This creates `.venv-gpu` with Python 3.12, PyTorch CUDA 12.6, Transformers,
+Accelerate, FastAPI, and the test dependencies. It does not change `.venv`.
+
+### 3. Start the API and UI
+
+```bash
+./scripts/run_local.sh
+```
+
+Open:
+
+```text
+http://127.0.0.1:8000/ui
+```
+
+Use another port with:
+
+```bash
+PORT=8001 ./scripts/run_local.sh
+```
+
+The server binds to `127.0.0.1`, so it is local only. If `API_KEY` is empty in
+`.env`, the UI does not need a key. If you set `API_KEY`, paste that key into the
+UI.
+
+### 4. Verify the GPU run
+
+```bash
+curl http://127.0.0.1:8000/health
+nvidia-smi
+```
+
+`/health` should return `model_loaded: true`, and `nvidia-smi` should show roughly
+3 GB of GPU memory in use.
+
+### Memory notes
+
+The laptop has 6.9 GB system RAM. Close heavy browser tabs and other applications
+before loading the model. If the 1.5B model runs out of memory, switch to the
+smaller fallback in `.env`:
+
+```text
+MODEL_ID=Qwen/Qwen2.5-0.5B-Instruct
+```
+
+The GTX 1060 is a Pascal card. It works, but generation is slower than a modern
+Colab GPU. Short paragraphs are fine; long documents take longer.
 
 ## Colab notebook 1: model experiments
 
@@ -735,7 +824,7 @@ Do not deploy this prototype as an open, unauthenticated endpoint.
 ### Phase 3 — inference module
 
 - [x] `ModelHumanizer` loads the primary model and retries the fallback
-- [x] BF16 on CUDA, FP32 on CPU
+- [x] FP16 on Pascal/older CUDA GPUs, BF16 on Ampere+, FP32 on CPU
 - [x] Chat template and generation settings
 - [x] Paragraph/sentence/token chunking
 - [x] Validation, domain errors, and safe output clearing
@@ -756,11 +845,22 @@ Do not deploy this prototype as an open, unauthenticated endpoint.
 - [x] Real-model integration test gated by `RUN_REAL_MODEL_TESTS=1`
 - [x] Colab API notebook created and syntax-validated
 - [x] Notebook loads one model, uses `TestClient`, starts Uvicorn, optional tunnel
-- [ ] **User action:** run `notebooks/colab_api_demo.ipynb` in Colab and tick the
+- [ ] Optional: run `notebooks/colab_api_demo.ipynb` in Colab and tick the
       in-notebook checkpoint
 
-The last item requires a GPU or a Colab runtime. It was not executed on the laptop;
-only the notebook structure and Python syntax were verified locally.
+### Phase 6 — local GPU validation
+
+- [x] NVIDIA driver `580.178.04` installed; Secure Boot compatible
+- [x] CUDA available to PyTorch `2.7.1+cu126`
+- [x] Qwen2.5-1.5B-Instruct loaded in FP16 on the GTX 1060
+- [x] VRAM use about 2.9–3.1 GB of 6 GB
+- [x] `/health` returns `200` with `model_loaded: true`
+- [x] `/humanize` returns a real rewrite locally
+- [x] `/ui` loads and can call the local API
+- [x] Repeatable setup and launch scripts added under `scripts/`
+
+The Colab path remains available for machines without a local GPU. Local inference
+was validated on this laptop with short paragraphs; long documents are slower.
 
 ## Limitations
 
