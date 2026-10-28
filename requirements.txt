@@ -1,8 +1,8 @@
 # Local development and API-only dependencies.
 #
 # Do NOT add torch, transformers, accelerate, or CUDA packages here. The laptop
-# does not run the model. Phase 2 will install inference dependencies inside the
-# Google Colab runtime.
+# does not run the model. Inference dependencies are installed inside the Google
+# Colab runtime from requirements-colab.txt.
 #
 # Python 3.11 or 3.12 is recommended. Python 3.12 matches common Colab runtimes.
 
