@@ -1,0 +1,13 @@
+# Google Colab inference dependencies.
+#
+# Install these only inside the Colab runtime. They are intentionally separate
+# from requirements.txt so the Ubuntu laptop stays lightweight.
+#
+# PyTorch is NOT pinned here. Colab normally provides a CUDA-matched build, and
+# replacing it blindly can break GPU support. The notebook checks for PyTorch and
+# installs an unpinned fallback only if it is missing.
+
+transformers==5.21.0
+accelerate==1.15.0
+jinja2==3.1.6
+textstat==0.7.13

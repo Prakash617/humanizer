@@ -7,9 +7,35 @@ The project is developed on an Ubuntu laptop and runs the Hugging Face model in
 Google Colab when a GPU is available. The laptop does **not** run model
 inference.
 
-> **Current status: Phase 1 — local development setup only.**
-> The model, inference function, full API, and automated model tests are added in
-> later phases. Do not proceed to Phase 2 until the Phase 1 checkpoint passes.
+> **Current status: Phase 2 — Colab model experiments.**
+> The Colab notebook loads Qwen2.5-1.5B-Instruct, tests the humanization prompt,
+> compares styles, evaluates outputs, and saves results. The reusable production
+> inference module and FastAPI integration are added in later phases.
+
+## Model decision (checked before use)
+
+The notebook verifies these facts again at runtime:
+
+| Item | Finding |
+|---|---|
+| Model | `Qwen/Qwen2.5-1.5B-Instruct` |
+| License | **Apache-2.0** |
+| Parameters | 1.54B total (1.31B non-embedding) |
+| Weight type | BF16 |
+| Approximate weights | ~3.1 GB, plus KV cache and runtime overhead |
+| Context | 32,768 tokens; up to 8,192 generated tokens |
+| Transformers | `>=4.37.0` required for Qwen2; Colab pins 5.21.0 |
+| Generation defaults | temperature `0.7`, top-p `0.8`, top-k `20`, repetition penalty `1.1` |
+| Fallback | `Qwen/Qwen2.5-0.5B-Instruct` (Apache-2.0) |
+
+The model is public and does not require a Hugging Face token. A free Colab T4 GPU
+has enough memory. CPU inference is possible but slow, so the notebook reduces the
+number of experiments on CPU.
+
+Model card: <https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct>
+
+Fallback: <https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct>
+
 
 ## How the system will work
 
@@ -46,21 +72,22 @@ humanizer/
 │   ├── __init__.py          # Package marker and version number
 │   ├── main.py              # FastAPI app and HTTP routes (Phase 4)
 │   ├── schemas.py           # Pydantic request/response models (Phase 4)
-│   └── humanizer.py         # Model loading and rewriting logic (Phases 2-3)
+│   └── humanizer.py         # Model loading and rewriting logic (Phase 3)
 ├── tests/
 │   ├── __init__.py          # Marks tests as a package
 │   └── test_api.py          # API tests; model mocked in Phase 5
 ├── notebooks/
 │   └── humanizer_experiments.ipynb  # Colab experiments (Phase 2)
 ├── requirements.txt         # Lightweight local dependencies only
+├── requirements-colab.txt   # Model inference dependencies for Colab
 ├── .gitignore               # Files that must never enter Git
 ├── .env.example             # Safe configuration template; copied to .env
 └── README.md                # This guide
 ```
 
-In Phase 1, `schemas.py` and `humanizer.py` are deliberately placeholders. They
-exist now so the architecture is clear and no model code gets mixed into the API
-entry point later.
+In Phase 1, `schemas.py` and `humanizer.py` were placeholders. Phase 2 keeps the
+production inference module empty while the notebook experiments. Phase 3 moves
+the reusable logic into `app/humanizer.py`.
 
 ## Requirements
 
@@ -70,8 +97,8 @@ entry point later.
 - Visual Studio Code
 - Internet access for package installation
 
-No NVIDIA/CUDA setup is needed on the laptop. No model weights are downloaded in
-Phase 1.
+No NVIDIA/CUDA setup is needed on the laptop. Model weights are downloaded only in
+the Colab runtime. The local virtual environment stays lightweight.
 
 ## Phase 1 setup
 
@@ -263,6 +290,165 @@ Confirm all of these before moving on:
 - [ ] the initial commit exists
 - [ ] no model weights or CUDA packages were installed locally
 
+## Phase 2: Run the model experiments in Colab
+
+The notebook is `notebooks/humanizer_experiments.ipynb`. It is a client of the Git
+repository; it does not share Python memory with your laptop.
+
+### What the notebook does
+
+1. Checks the Colab Python and GPU.
+2. Clones or updates the repository.
+3. Installs the pinned Colab inference requirements.
+4. Verifies the model card, license, revision, and repository size.
+5. Loads Qwen2.5-1.5B-Instruct with the official chat template.
+6. Runs a basic generation test.
+7. Defines and tests `humanize_text(text, style="natural")`.
+8. Rewrites several sample paragraphs.
+9. Compares all five styles on one factual paragraph.
+10. Computes automatic preservation/readability signals.
+11. Provides a human review rubric.
+12. Saves results without model weights.
+
+### 1. Push the Phase 2 files
+
+From the laptop, after configuring your GitHub remote:
+
+```bash
+cd ~/Desktop/program/ai/humanizer
+source .venv/bin/activate
+python -m pytest -q
+git add .
+git commit -m "feat: add Phase 2 Colab experiments"
+git push -u origin main
+```
+
+If this is the first push and no remote exists:
+
+```bash
+git remote add origin git@github.com:YOUR_USERNAME/humanizer.git
+git push -u origin main
+```
+
+### 2. Open the notebook in Colab
+
+Use **File > Open notebook > GitHub**, enter your repository, and select
+`notebooks/humanizer_experiments.ipynb`. Uploading the `.ipynb` file manually also
+works.
+
+In the notebook, edit:
+
+```python
+REPO_URL = "https://github.com/YOUR_USERNAME/humanizer.git"
+```
+
+Use a public repository for the simplest setup. Do not paste a GitHub token into a
+notebook cell.
+
+### 3. Select a GPU
+
+In Colab: **Runtime > Change runtime type > T4 GPU** (or another available GPU).
+If no GPU is available, the notebook can run on CPU, but it is much slower and runs
+fewer samples.
+
+### 4. Run the cells from top to bottom
+
+Do not skip the model-card check. If Colab asks you to restart the runtime after
+installing packages, restart and run from the top. Installed packages and model
+weights do not survive a runtime reset.
+
+### Dependency choices
+
+`requirements-colab.txt` pins:
+
+```text
+transformers==5.21.0
+accelerate==1.15.0
+jinja2==3.1.6
+textstat==0.7.13
+```
+
+PyTorch is **not** pinned there. Colab normally supplies a CUDA-matched PyTorch
+build. Replacing it with an arbitrary wheel is a common cause of
+`torch.cuda.is_available() == False`. The notebook checks for PyTorch and installs
+an unpinned fallback only when it is missing. Transformers 5.21 is tested with
+`torch>=2.6`; start a fresh GPU runtime if yours is older. Model weights are cached
+in `/content/hf_cache`, outside Git.
+
+### Expected behavior
+
+- The model-card cell prints `Apache-2.0`, `Gated: False`, and about `3.1 GB`.
+- The model loads in BF16 on a T4 GPU.
+- The basic prompt produces a short English answer.
+- Each sample produces a rewritten paragraph, not a label or explanation.
+- The style comparison changes tone while keeping the same names and numbers.
+- Results are written to `/content/humanizer_results/<timestamp>/`.
+
+If the 1.5B model cannot load, the notebook retries with
+`Qwen/Qwen2.5-0.5B-Instruct`. The fallback is less capable, so review it more
+carefully.
+
+### Model evaluation checklist
+
+For every source/output pair:
+
+- [ ] Meaning is preserved, including qualifications such as “may” and “often”.
+- [ ] Names, dates, numbers, units, quotations, and technical terms are unchanged.
+- [ ] No facts, examples, citations, or statistics were invented.
+- [ ] The point of view and level of certainty are preserved.
+- [ ] Readability improved without oversimplifying the content.
+- [ ] The requested style is recognizable but not exaggerated.
+- [ ] The output is coherent, complete, and free of obvious repetition.
+- [ ] The output contains only the rewrite, with no commentary or heading.
+- [ ] A human would publish it after a light edit.
+
+The automatic table flags missing/extra numbers and missing capitalized terms, but
+these are **advisory**. A missing name can be a legitimate rewording; an extra
+number is a possible fabrication. Manual review is mandatory.
+
+### Style definitions used in the notebook
+
+- `natural`: polished human-editor English with varied sentence lengths.
+- `academic`: formal, precise, restrained, and appropriately qualified.
+- `professional`: concise, direct, and workplace-appropriate.
+- `simple`: plain wording and short sentences without adding explanations.
+- `friendly`: warm and conversational without becoming overly familiar.
+
+### Limits and safety
+
+Instruction-following is probabilistic. The prompt cannot guarantee that every
+fact, name, or number is preserved. The `<source_text>` tags organize the prompt
+but are not a security boundary against prompt injection.
+
+This project improves writing quality. It does not claim to guarantee a particular
+AI-detector result, and it must not be presented as a detector-bypass tool.
+
+For inputs up to 8,000 tokens, the notebook splits text at paragraph/sentence
+boundaries into chunks of at most 1,400 tokens. Above 8,000 tokens it raises a clear
+error instead of silently truncating. Phase 3 will move this logic into the
+production inference module and harden it.
+
+### Saving results
+
+Results are saved locally inside the Colab runtime automatically. Optionally run
+the commented Drive or download cells to copy the results to persistent storage.
+Model weights, Hugging Face caches, and Colab packages are never saved in Git.
+
+### Phase 2 checkpoint
+
+- [ ] Notebook opens in Colab
+- [ ] GPU check runs
+- [ ] Repository clone/update succeeds
+- [ ] Pinned dependencies install
+- [ ] Model card check reports Apache-2.0
+- [ ] Model loads (1.5B or documented fallback)
+- [ ] Basic generation works
+- [ ] At least one sample is humanized
+- [ ] Styles are compared
+- [ ] Automatic checks and manual review are completed
+- [ ] Results are saved outside the repository
+- [ ] `git status` on the laptop shows no weights or experiment outputs
+
 ## Troubleshooting
 
 ### `ensurepip is not available` or `No module named venv`
@@ -322,9 +508,42 @@ Set `user.name` and `user.email` as shown above, then commit again.
 Use Python 3.12 for this project. Model libraries often publish wheels later for
 brand-new Python releases, so matching Colab's Python version avoids surprises.
 
+### Colab reports `CUDA out of memory`
+
+1. Use **Runtime > Restart runtime**.
+2. Run the notebook from the top.
+3. Let the notebook fall back to `Qwen/Qwen2.5-0.5B-Instruct`.
+4. Do not load two models in the same session.
+
+### Colab says CUDA is unavailable
+
+- Confirm the runtime type is GPU.
+- Do not reinstall an arbitrary PyTorch CUDA wheel. Restart and let Colab provide
+  its matched build.
+- Re-run the dependency-check cell and print `torch.version.cuda`.
+
+### Model download fails in Colab
+
+- Check the internet connection and free disk space.
+- Confirm the repository URL and branch in the clone cell.
+- The Qwen model is public. An invalid `HF_TOKEN` can still cause authentication
+  errors; remove the secret and retry.
+- Re-run the loading cell after a partial download; Hugging Face may resume it.
+
+### `qwen2`, `apply_chat_template`, or import errors
+
+Restart the runtime and reinstall the pinned Colab requirements. Qwen2 requires
+Transformers 4.37+, and mixing versions in one runtime causes confusing errors.
+
+### Long input is rejected
+
+This is deliberate for the Phase 2 prototype: it avoids silent truncation. Split
+the document into sections. Production-safe chunking will be implemented in
+`app/humanizer.py` in Phase 3.
+
 ## Next phase
 
-Phase 2 will add and explain the Colab notebook: runtime/GPU checks, compatible
-inference packages, repository clone, model-card review, model loading,
-generation experiments, evaluation, and safe result saving. No model will be
-loaded until that phase.
+Phase 3 will move the tested inference logic into `app/humanizer.py`, add the
+production `humanize_text(text, style="natural")` interface, harden validation and
+error handling, and keep model loading separate from the FastAPI routes. The API
+itself starts in Phase 4.
