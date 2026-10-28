@@ -285,6 +285,8 @@ def test_api_uses_remote_backend(
     assert health.status_code == 200
     assert health.json()["model_loaded"] is True
     assert health.json()["model_id"] == "nvidia/test-model"
+    assert health.json()["backend"] == "remote"
+    assert health.json()["max_input_characters"] == settings.max_input_characters
 
 
 def test_api_remote_success(

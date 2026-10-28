@@ -1,8 +1,8 @@
 """Minimal built-in web UI for the humanizer API.
 
 The page is plain HTML, CSS, and JavaScript so it needs no template engine, build
-step, or CDN. It calls the same ``/humanize`` endpoint, which means it works both
-on localhost and through a temporary Colab tunnel.
+step, or CDN. It calls the same ``/health`` and ``/humanize`` endpoints, so it
+works with local inference, the remote backend, and a temporary Colab tunnel.
 """
 
 UI_HTML = r"""<!doctype html>
@@ -53,6 +53,36 @@ UI_HTML = r"""<!doctype html>
     h1 { margin: 0 0 6px; font-size: clamp(1.7rem, 4vw, 2.35rem); letter-spacing: -0.02em; }
     .subtitle { margin: 0; color: var(--muted); max-width: 65ch; }
 
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin: 0 0 18px;
+      padding: 10px 13px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .status .dot {
+      width: 8px;
+      height: 8px;
+      flex: none;
+      border-radius: 50%;
+      background: #98a2b3;
+    }
+
+    .status.ok .dot { background: var(--ok); }
+    .status.warn .dot { background: #b54708; }
+    .status.bad .dot { background: var(--danger-ink); }
+
+    #status-text {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
     .layout {
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -99,6 +129,8 @@ UI_HTML = r"""<!doctype html>
     }
 
     .counter { color: var(--muted); font-size: 0.82rem; }
+    .counter.over { color: var(--danger-ink); font-weight: 650; }
+    .actions { display: flex; gap: 8px; }
 
     button {
       border: 0;
@@ -181,9 +213,14 @@ UI_HTML = r"""<!doctype html>
       <h1>AI Humanizer</h1>
       <p class="subtitle">
         Rewrite English text for clarity, fluency, and readability while preserving
-        meaning. The model runs in the same API process.
+        meaning. Works with a local model or an OpenAI-compatible remote backend.
       </p>
     </header>
+
+    <div id="status" class="status" role="status" aria-live="polite">
+      <span class="dot" aria-hidden="true"></span>
+      <span id="status-text">Checking server...</span>
+    </div>
 
     <div class="layout">
       <section class="card" aria-labelledby="input-heading">
@@ -191,16 +228,18 @@ UI_HTML = r"""<!doctype html>
 
         <form id="humanize-form">
           <div class="field">
-            <label for="api-key">API key</label>
+            <label for="api-key">App access key <span class="hint">(optional)</span></label>
             <input
               id="api-key"
               type="password"
               autocomplete="off"
               spellcheck="false"
-              placeholder="Paste the key printed by the Colab notebook"
+              placeholder="Only if the server has API_KEY configured"
             >
             <p class="hint">
-              Leave this empty only when the server has no <code>API_KEY</code> set.
+              This is the server's optional <code>X-API-Key</code>, not your
+              NVIDIA/provider key. The provider key stays in the server's
+              <code>.env</code>. Leave this empty when <code>API_KEY</code> is unset.
               The key is sent only to this server.
             </p>
           </div>
@@ -214,7 +253,10 @@ UI_HTML = r"""<!doctype html>
             ></textarea>
             <div class="row" style="margin-top: 6px;">
               <span id="counter" class="counter">0 characters</span>
-              <button type="button" id="sample" class="ghost small">Use sample</button>
+              <span class="actions">
+                <button type="button" id="sample" class="ghost small">Use sample</button>
+                <button type="button" id="clear" class="ghost small">Clear</button>
+              </span>
             </div>
           </div>
 
@@ -257,16 +299,32 @@ UI_HTML = r"""<!doctype html>
     const style = document.querySelector("#style");
     const submit = document.querySelector("#submit");
     const sample = document.querySelector("#sample");
+    const clearButton = document.querySelector("#clear");
     const counter = document.querySelector("#counter");
     const errorBox = document.querySelector("#error");
     const output = document.querySelector("#output");
     const meta = document.querySelector("#meta");
     const copy = document.querySelector("#copy");
+    const status = document.querySelector("#status");
+    const statusText = document.querySelector("#status-text");
 
     const SAMPLE = "Technology plays an important role in modern education. It gives students access to more information, but it also requires teachers to guide them carefully. In 2024, many schools began testing new tools in the classroom.";
+    let maxChars = 8000;
 
     sample.addEventListener("click", () => {
       text.value = SAMPLE;
+      updateCounter();
+      text.focus();
+    });
+
+    clearButton.addEventListener("click", () => {
+      text.value = "";
+      output.textContent = "Your rewritten text will appear here.";
+      meta.textContent = "";
+      meta.className = "meta";
+      copy.disabled = true;
+      copy.textContent = "Copy";
+      clearError();
       updateCounter();
       text.focus();
     });
@@ -281,7 +339,7 @@ UI_HTML = r"""<!doctype html>
     text.addEventListener("keydown", (event) => {
       if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
         event.preventDefault();
-        humanize();
+        if (!submit.disabled) humanize();
       }
     });
 
@@ -305,7 +363,9 @@ UI_HTML = r"""<!doctype html>
 
     function updateCounter() {
       const count = text.value.length;
-      counter.textContent = count === 1 ? "1 character" : `${count} characters`;
+      counter.textContent =
+        `${count.toLocaleString()} / ${maxChars.toLocaleString()} characters`;
+      counter.classList.toggle("over", count > maxChars);
     }
 
     function clearError() {
@@ -330,7 +390,59 @@ UI_HTML = r"""<!doctype html>
       return "The request failed. Check the server log.";
     }
 
+    function friendlyError(statusCode, detail) {
+      if (statusCode === 401) {
+        return "This server requires an app access key. Enter it above and retry.";
+      }
+      if (statusCode === 429) {
+        return "The remote provider rate limit was reached. Wait a moment and retry.";
+      }
+      if (statusCode === 502) {
+        return `The remote provider rejected the request.\n${formatDetail(detail)}`;
+      }
+      if (statusCode === 503) {
+        return `The model is not ready.\n${formatDetail(detail)}`;
+      }
+      if (statusCode === 504) {
+        return "The remote provider timed out. Retry, or use shorter text.";
+      }
+      return `HTTP ${statusCode}\n${formatDetail(detail)}`;
+    }
+
+    async function loadStatus() {
+      try {
+        const response = await fetch("/health", {
+          cache: "no-store",
+          headers: { "ngrok-skip-browser-warning": "true" }
+        });
+        const health = await response.json().catch(() => ({}));
+
+        if (Number.isInteger(health.max_input_characters)) {
+          maxChars = health.max_input_characters;
+          text.maxLength = maxChars;
+          updateCounter();
+        }
+
+        const backend = health.backend === "remote" ? "Remote model" : "Local model";
+        if (response.ok && health.model_loaded) {
+          status.className = "status ok";
+          statusText.textContent = health.model_id
+            ? `${backend} ready · ${health.model_id}`
+            : `${backend} ready`;
+        } else {
+          status.className = "status warn";
+          statusText.textContent = health.detail
+            ? `${backend} not ready · ${health.detail}`
+            : `${backend} not ready. Check the server log.`;
+        }
+      } catch {
+        status.className = "status bad";
+        statusText.textContent = "Cannot reach the API. Confirm the server is running.";
+      }
+    }
+
     async function humanize() {
+      if (submit.disabled) return;
       clearError();
 
       if (!text.value.trim()) {
@@ -339,8 +451,19 @@ UI_HTML = r"""<!doctype html>
         return;
       }
 
+      if (text.value.length > maxChars) {
+        showError(
+          `The input is too long. Keep it under ${maxChars.toLocaleString()} characters.`
+        );
+        text.focus();
+        return;
+      }
+
       submit.disabled = true;
       submit.textContent = "Rewriting...";
+      copy.disabled = true;
+      copy.textContent = "Copy";
+      output.textContent = "Rewriting...";
       meta.textContent = "";
       meta.className = "meta";
 
@@ -365,15 +488,21 @@ UI_HTML = r"""<!doctype html>
         const data = await response.json().catch(() => ({}));
 
         if (!response.ok) {
-          showError(`HTTP ${response.status}\n${formatDetail(data.detail)}`);
+          output.textContent = "No result.";
+          showError(friendlyError(response.status, data.detail));
           return;
         }
 
         output.textContent = data.humanized_text;
         copy.disabled = false;
         meta.className = "meta ok";
-        meta.textContent = `${data.style} | ${data.original_characters} to ${data.rewritten_characters} characters | HTTP ${response.status}`;
+        const selectedStyle = style.options[style.selectedIndex];
+        const styleLabel = selectedStyle ? selectedStyle.text : data.style;
+        meta.textContent =
+          `${styleLabel} · ${data.original_characters} → ` +
+          `${data.rewritten_characters} characters`;
       } catch (error) {
+        output.textContent = "No result.";
         showError(
           "Could not reach the API. Confirm the server is running and the URL is correct.\n" +
           String(error)
@@ -385,6 +514,7 @@ UI_HTML = r"""<!doctype html>
     }
 
     updateCounter();
+    loadStatus();
   </script>
 </body>
 </html>

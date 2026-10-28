@@ -303,6 +303,8 @@ Returns `200` when the model is loaded:
   "version": "0.2.0",
   "model_loaded": true,
   "model_id": "Qwen/Qwen2.5-1.5B-Instruct",
+  "backend": "local",
+  "max_input_characters": 8000,
   "detail": null
 }
 ```
@@ -387,15 +389,18 @@ in one request because hosted models have much larger context windows.
 
 The API includes a dependency-free UI at `/ui`. It lets you:
 
-- paste the API key
-- paste or type text
+- see whether the local or remote model is ready
+- see the active model ID and server character limit
+- paste the optional app access key (not the provider key)
+- paste or type text, use a sample, or clear the form
 - choose one of the five styles
 - click **Humanize**
 - copy the rewritten result
 - see clear validation and HTTP errors
 
-No extra packages, build step, or CDN is required. The page calls `/humanize` on
-the same origin, so the API key is never embedded in the HTML.
+No extra packages, build step, or CDN is required. The page calls `/health` and
+`/humanize` on the same origin, so keys are never embedded in the HTML. The
+provider key stays on the server in `.env`.
 
 ### In Colab
 
@@ -1048,6 +1053,7 @@ was validated on this laptop with short paragraphs; long documents are slower.
 - [x] Offline request, auth, rate-limit, timeout, and malformed-response tests
 - [x] Opt-in real-provider integration test
 - [x] `scripts/run_remote.sh` launch helper
+- [x] UI shows backend/model readiness, the server character limit, and clarifies app vs. provider keys
 - [ ] Optional: rotate a fresh NIM key into `.env` and run the real remote test
 
 The remote request path was validated end-to-end against a local

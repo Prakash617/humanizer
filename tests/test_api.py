@@ -92,6 +92,9 @@ def test_ui_is_served(client: TestClient) -> None:
     assert response.headers["content-type"].startswith("text/html")
     assert "AI Humanizer" in response.text
     assert 'id="humanize-form"' in response.text
+    assert 'id="status"' in response.text
+    assert 'id="clear"' in response.text
+    assert "not your" in response.text
     assert "/humanize" in response.text
 
 
@@ -103,6 +106,8 @@ def test_health_endpoint_when_model_loaded(client: TestClient) -> None:
     assert body["status"] == "ok"
     assert body["model_loaded"] is True
     assert body["model_id"] == "fake/model"
+    assert body["backend"] == settings.inference_backend
+    assert body["max_input_characters"] == settings.max_input_characters
     assert body["detail"] is None
 
 
@@ -116,6 +121,8 @@ def test_health_endpoint_when_model_failed() -> None:
     assert body["status"] == "degraded"
     assert body["model_loaded"] is False
     assert body["model_id"] is None
+    assert body["backend"] == settings.inference_backend
+    assert body["max_input_characters"] == settings.max_input_characters
 
 
 def test_valid_humanization_request(client: TestClient) -> None:

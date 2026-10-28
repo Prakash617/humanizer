@@ -163,6 +163,8 @@ def create_app(humanizer: HumanizerProtocol | None = None) -> FastAPI:
             version=settings.app_version,
             model_loaded=loaded,
             model_id=service.loaded_model_id if loaded else None,
+            backend=settings.inference_backend,
+            max_input_characters=settings.max_input_characters,
             detail=(
                 None
                 if loaded

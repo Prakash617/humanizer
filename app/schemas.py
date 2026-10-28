@@ -83,4 +83,6 @@ class HealthResponse(BaseModel):
     version: str
     model_loaded: bool
     model_id: str | None = None
+    backend: Literal["local", "remote"] | None = None
+    max_input_characters: int | None = Field(default=None, ge=1)
     detail: str | None = None
